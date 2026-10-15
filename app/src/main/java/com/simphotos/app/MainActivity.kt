@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
     private fun App(vm: MainViewModel) {
         val state by vm.state.collectAsStateWithLifecycle()
         val settings by vm.settings.collectAsStateWithLifecycle()
+        val update by vm.update.collectAsStateWithLifecycle()
         var granted by remember { mutableStateOf(hasFullAccess() || hasPartialAccess()) }
         var denied by remember { mutableStateOf(false) }
         val snackbar = remember { SnackbarHostState() }
@@ -184,6 +185,12 @@ class MainActivity : ComponentActivity() {
                             onBack = { vm.back() },
                             onChange = vm::updateSettings,
                             onClearCache = vm::clearCache,
+                            currentVersion = vm.currentVersion,
+                            update = update,
+                            onCheckUpdate = vm::checkForUpdates,
+                            onDownloadUpdate = vm::downloadUpdate,
+                            onCancelDownload = vm::cancelUpdateDownload,
+                            onInstallUpdate = vm::installUpdate,
                         )
                         Screen.Done -> DoneScreen(
                             summary = state.lastDelete,

@@ -14,6 +14,9 @@ import com.simphotos.app.data.SettingsRepository
 import com.simphotos.app.data.SimilarGroup
 import com.simphotos.app.engine.ImageAnalyzer
 import com.simphotos.app.engine.SimilarityEngine
+import com.simphotos.app.update.UpdateInfo
+import com.simphotos.app.update.UpdateManager
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -50,6 +53,16 @@ data class ScanProgress(
 
 data class DeleteSummary(val count: Int, val bytes: Long)
 
+sealed interface UpdateState {
+    data object Idle : UpdateState
+    data object Checking : UpdateState
+    data object UpToDate : UpdateState
+    data class Available(val info: UpdateInfo) : UpdateState
+    data class Downloading(val info: UpdateInfo, val progress: Float) : UpdateState
+    data class ReadyToInstall(val info: UpdateInfo, val file: File) : UpdateState
+    data class Failed(val message: String) : UpdateState
+}
+
 data class UiState(
     val screen: Screen = Screen.Home,
     val galleryCount: Int? = null,
@@ -73,6 +86,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val cache = FeatureCache(app)
     private val settingsRepo = SettingsRepository(app)
     private val analyzer = ImageAnalyzer(app.contentResolver)
+    private val updater = UpdateManager(app)
+
+    val currentVersion: String get() = updater.currentVersion
+
+    private val _update = MutableStateFlow<UpdateState>(UpdateState.Idle)
+    val update: StateFlow<UpdateState> = _update.asStateFlow()
+    private var updateJob: Job? = null
 
     val settings: StateFlow<AppSettings> = settingsRepo.settings
 
@@ -86,6 +106,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingDeleteIds: List<Long> = emptyList()
 
     init {
+        // Any APK left from a previous update has been installed (or abandoned) by now.
+        viewModelScope.launch(Dispatchers.IO) { updater.cleanUp() }
         // Changing the sensitivity after a scan regroups instantly, without re-analyzing.
         viewModelScope.launch {
             settings.drop(1).collect { s -> analyzed?.let { regroup(it, s) } }
@@ -283,6 +305,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 screen = Screen.Done,
             )
         }
+    }
+
+    /** Called when the settings screen opens. Skips the check while a download is in progress. */
+    fun checkForUpdates() {
+        when (_update.value) {
+            is UpdateState.Checking, is UpdateState.Downloading, is UpdateState.ReadyToInstall -> return
+            else -> Unit
+        }
+        updateJob = viewModelScope.launch {
+            _update.value = UpdateState.Checking
+            _update.value = try {
+                updater.checkForUpdate()?.let { UpdateState.Available(it) } ?: UpdateState.UpToDate
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                UpdateState.Failed("Impossibile verificare gli aggiornamenti. Controlla la connessione.")
+            }
+        }
+    }
+
+    fun downloadUpdate() {
+        val info = (_update.value as? UpdateState.Available)?.info ?: return
+        updateJob = viewModelScope.launch {
+            _update.value = UpdateState.Downloading(info, 0f)
+            try {
+                var last = 0f
+                val file = updater.download(info) { p ->
+                    if (p - last >= 0.01f || p >= 1f) {
+                        last = p
+                        _update.value = UpdateState.Downloading(info, p)
+                    }
+                }
+                _update.value = UpdateState.ReadyToInstall(info, file)
+                installUpdate()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                _update.value = UpdateState.Available(info)
+                throw e
+            } catch (e: Exception) {
+                _update.value = UpdateState.Failed("Download non riuscito. Riprova.")
+            }
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        updateJob?.cancel()
+    }
+
+    fun installUpdate() {
+        val ready = _update.value as? UpdateState.ReadyToInstall ?: return
+        // The first time, Android asks to allow installs from SimPhotos; the user then taps again.
+        if (updater.canInstall()) updater.install(ready.file) else updater.openInstallPermissionSettings()
     }
 
     fun dismissError() = _state.update { it.copy(error = null) }

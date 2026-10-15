@@ -44,6 +44,26 @@ import com.simphotos.app.data.AppSettings
 import com.simphotos.app.data.DeleteMode
 import com.simphotos.app.data.TimeWindow
 import com.simphotos.app.ui.components.SectionLabel
+import com.simphotos.app.ui.components.formatBytes
+import com.simphotos.app.ui.UpdateState
+import com.simphotos.app.ui.theme.BrandGradient
+import com.simphotos.app.ui.theme.Mint
+import com.simphotos.app.ui.theme.Violet
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.NewReleases
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import kotlin.math.roundToInt
 
 private fun thresholdLabel(t: Float): Pair<String, String> = when {
@@ -60,7 +80,14 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onChange: ((AppSettings) -> AppSettings) -> Unit,
     onClearCache: () -> Unit,
+    currentVersion: String,
+    update: UpdateState,
+    onCheckUpdate: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onInstallUpdate: () -> Unit,
 ) {
+    LaunchedEffect(Unit) { onCheckUpdate() }
     // Keep the slider value local while dragging and commit on release, so we don't regroup at every frame.
     var sliderValue by remember(settings.threshold) { mutableFloatStateOf(settings.threshold) }
     var cacheCleared by remember { mutableStateOf(false) }
@@ -73,7 +100,10 @@ fun SettingsScreen(
             Text("Impostazioni", style = MaterialTheme.typography.titleLarge)
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
-            SectionLabel("Somiglianza", Modifier.padding(top = 12.dp, bottom = 8.dp))
+            SectionLabel("Aggiornamenti", Modifier.padding(top = 12.dp, bottom = 8.dp))
+            UpdateCard(currentVersion, update, onCheckUpdate, onDownloadUpdate, onCancelDownload, onInstallUpdate)
+
+            SectionLabel("Somiglianza", Modifier.padding(top = 24.dp, bottom = 8.dp))
             Card {
                 val (title, body) = thresholdLabel(sliderValue)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -182,6 +212,116 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 32.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun UpdateCard(
+    currentVersion: String,
+    update: UpdateState,
+    onCheck: () -> Unit,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onInstall: () -> Unit,
+) {
+    val highlighted = update is UpdateState.Available || update is UpdateState.Downloading ||
+        update is UpdateState.ReadyToInstall
+    val onColor = if (highlighted) Color.White else MaterialTheme.colorScheme.onSurface
+    val subColor = if (highlighted) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant
+
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+            .background(if (highlighted) BrandGradient else SolidColor(MaterialTheme.colorScheme.surfaceContainer))
+            .animateContentSize()
+            .padding(18.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape)
+                    .background(if (highlighted) Color.White.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                when (update) {
+                    UpdateState.Checking -> CircularProgressIndicator(
+                        strokeWidth = 2.5.dp, modifier = Modifier.size(22.dp), color = MaterialTheme.colorScheme.primary,
+                    )
+                    UpdateState.UpToDate -> Icon(Icons.Rounded.CheckCircle, null, tint = Mint)
+                    is UpdateState.Failed -> Icon(Icons.Rounded.CloudOff, null, tint = MaterialTheme.colorScheme.error)
+                    UpdateState.Idle -> Icon(Icons.Rounded.SystemUpdate, null, tint = MaterialTheme.colorScheme.primary)
+                    else -> Icon(Icons.Rounded.NewReleases, null, tint = Color.White)
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when (update) {
+                        UpdateState.Idle, UpdateState.Checking -> "Cerco aggiornamenti…"
+                        UpdateState.UpToDate -> "SimPhotos è aggiornata"
+                        is UpdateState.Failed -> "Controllo non riuscito"
+                        is UpdateState.Available -> "Nuova versione ${update.info.version}"
+                        is UpdateState.Downloading -> "Download in corso…"
+                        is UpdateState.ReadyToInstall -> "Pronta da installare"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = onColor,
+                )
+                Text(
+                    when (update) {
+                        is UpdateState.Failed -> update.message
+                        is UpdateState.Available -> "Versione attuale $currentVersion · ${formatBytes(update.info.sizeBytes)}"
+                        is UpdateState.Downloading -> "${(update.progress * 100).toInt()}% di ${formatBytes(update.info.sizeBytes)}"
+                        is UpdateState.ReadyToInstall -> "Versione ${update.info.version} scaricata"
+                        else -> "Versione $currentVersion"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = subColor,
+                )
+            }
+            if (update == UpdateState.UpToDate || update is UpdateState.Failed) {
+                IconButton(onClick = onCheck) {
+                    Icon(Icons.Rounded.Refresh, "Controlla di nuovo", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        if (update is UpdateState.Available && update.info.notes.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(update.info.notes, style = MaterialTheme.typography.bodyMedium, color = subColor)
+        }
+        if (update is UpdateState.Downloading) {
+            Spacer(Modifier.height(14.dp))
+            LinearProgressIndicator(
+                progress = { update.progress },
+                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)),
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.25f),
+                drawStopIndicator = {},
+            )
+        }
+        if (highlighted) {
+            Spacer(Modifier.height(14.dp))
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(16.dp)).background(Color.White)
+                    .clickable {
+                        when (update) {
+                            is UpdateState.Available -> onDownload()
+                            is UpdateState.Downloading -> onCancel()
+                            else -> onInstall()
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    when (update) {
+                        is UpdateState.Available -> "Scarica e installa"
+                        is UpdateState.Downloading -> "Annulla"
+                        else -> "Installa ora"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Violet,
+                )
+            }
         }
     }
 }
