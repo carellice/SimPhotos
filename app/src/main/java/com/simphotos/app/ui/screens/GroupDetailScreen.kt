@@ -1,6 +1,7 @@
 package com.simphotos.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import com.simphotos.app.data.SimilarGroup
 import com.simphotos.app.ui.components.Badge
 import com.simphotos.app.ui.components.PhotoThumb
+import com.simphotos.app.ui.components.PhotoViewer
 import com.simphotos.app.ui.components.SelectableThumb
 import com.simphotos.app.ui.components.formatBytes
 import com.simphotos.app.ui.components.formatDate
@@ -65,6 +71,7 @@ fun GroupDetailScreen(
     val pager = rememberPagerState { group.members.size }
     val strip = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    var viewerOpen by remember { mutableStateOf(false) }
     LaunchedEffect(pager.currentPage) { strip.animateScrollToItem(pager.currentPage) }
 
     val current = group.members[pager.currentPage.coerceIn(0, group.members.lastIndex)]
@@ -92,6 +99,7 @@ fun GroupDetailScreen(
             val m = group.members[page]
             Box(
                 Modifier.fillMaxSize().clip(RoundedCornerShape(26.dp)).background(MaterialTheme.colorScheme.surfaceContainer)
+                    .clickable { viewerOpen = true }
             ) {
                 PhotoThumb(m.photo, Modifier.fillMaxSize(), size = 1600, contentScale = ContentScale.Fit)
                 Row(Modifier.align(Alignment.TopStart).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -170,5 +178,12 @@ fun GroupDetailScreen(
                 Text("Tieni solo questa")
             }
         }
+    }
+
+    if (viewerOpen) {
+        PhotoViewer(group, pager.currentPage, toDelete, onToggle, onDismiss = { page ->
+            viewerOpen = false
+            scope.launch { pager.scrollToPage(page) }
+        })
     }
 }

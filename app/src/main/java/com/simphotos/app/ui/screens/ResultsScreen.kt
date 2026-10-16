@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -48,6 +49,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.simphotos.app.data.DeleteMode
@@ -55,6 +58,7 @@ import com.simphotos.app.data.SimilarGroup
 import com.simphotos.app.ui.UiState
 import com.simphotos.app.ui.components.Badge
 import com.simphotos.app.ui.components.GradientButton
+import com.simphotos.app.ui.components.PhotoViewer
 import com.simphotos.app.ui.components.SelectableThumb
 import com.simphotos.app.ui.components.formatBytes
 import com.simphotos.app.ui.components.formatDate
@@ -74,6 +78,8 @@ fun ResultsScreen(
     onConfirmDelete: () -> Unit,
 ) {
     var showConfirm by remember { mutableStateOf(false) }
+    // (groupId, index) of the photo shown full screen, if any.
+    var viewing by remember { mutableStateOf<Pair<Long, Int>?>(null) }
     val count = state.toDelete.size
     val bytes = state.toDeleteBytes
 
@@ -99,7 +105,7 @@ fun ResultsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "Tocca una foto per tenerla o eliminarla",
+                            "Tocca una foto per tenerla o eliminarla, tieni premuto per vederla in grande",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
@@ -110,7 +116,11 @@ fun ResultsScreen(
                     }
                 }
                 items(state.groups, key = { it.id }) { group ->
-                    GroupCard(group, state.toDelete, onToggle, onOpen = { onOpenGroup(group.id) })
+                    GroupCard(
+                        group, state.toDelete, onToggle,
+                        onOpen = { onOpenGroup(group.id) },
+                        onPreview = { viewing = group.id to it },
+                    )
                 }
             }
         }
@@ -136,6 +146,12 @@ fun ResultsScreen(
                     onClick = { showConfirm = true },
                 )
             }
+        }
+    }
+
+    viewing?.let { (groupId, index) ->
+        state.groups.firstOrNull { it.id == groupId }?.let { group ->
+            PhotoViewer(group, index, state.toDelete, onToggle, onDismiss = { viewing = null })
         }
     }
 
@@ -196,7 +212,9 @@ private fun GroupCard(
     toDelete: Set<Long>,
     onToggle: (Long) -> Unit,
     onOpen: () -> Unit,
+    onPreview: (Int) -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     val selected = group.members.count { it.photo.id in toDelete }
     Column(
         Modifier
@@ -236,12 +254,16 @@ private fun GroupCard(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(group.members, key = { it.photo.id }) { m ->
+            itemsIndexed(group.members, key = { _, m -> m.photo.id }) { i, m ->
                 SelectableThumb(
                     photo = m.photo,
                     isBest = m.photo.id == group.bestId,
                     markedForDelete = m.photo.id in toDelete,
                     thumbSize = if (m.photo.id == group.bestId) 120.dp else 96.dp,
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onPreview(i)
+                    },
                     onClick = { onToggle(m.photo.id) },
                 )
             }

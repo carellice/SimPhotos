@@ -5,7 +5,9 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -88,6 +90,7 @@ fun PhotoThumb(
  * A square thumbnail showing whether the photo will be kept (gold "Migliore" badge)
  * or deleted (red check overlay).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SelectableThumb(
     photo: Photo,
@@ -95,6 +98,7 @@ fun SelectableThumb(
     markedForDelete: Boolean,
     modifier: Modifier = Modifier,
     thumbSize: Dp = 96.dp,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val scale by animateFloatAsState(if (markedForDelete) 0.92f else 1f, label = "scale")
@@ -112,7 +116,7 @@ fun SelectableThumb(
             .scale(scale)
             .clip(RoundedCornerShape(16.dp))
             .border(3.dp, borderColor, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onLongClick = onLongClick, onClick = onClick)
     ) {
         PhotoThumb(photo, Modifier.fillMaxSize())
         if (markedForDelete) {
